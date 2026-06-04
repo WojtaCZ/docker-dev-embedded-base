@@ -1,0 +1,50 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug (Cortex-Debug / openocd)",
+            "type": "cortex-debug",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/build/firmware.elf",
+            "servertype": "openocd",
+            "configFiles": [
+                "${env:OPENOCD_INTERFACE}",
+                "${env:OPENOCD_TARGET}"
+            ],
+            "svdFile": "${env:SVD_FILE}",
+            "preLaunchTask": "Debug",
+            "postDebugTask": "",
+            "runToEntryPoint": "main",
+            "showDevDebugOutput": "none"
+        },
+        {
+            "name": "Debug (Cortex-Debug / BMP)",
+            "type": "cortex-debug",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/build/firmware.elf",
+            "servertype": "bmp",
+            "BMPGDBSerialPort": "${env:BMP_PORT}",
+            "powerOverBMP": "enable",
+            "svdFile": "${env:SVD_FILE}",
+            "preLaunchTask": "Build (Debug)",
+            "runToEntryPoint": "main"
+        },
+        {
+            "name": "Debug (GDB / RISC-V)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/firmware.elf",
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "miDebuggerPath": "/usr/bin/riscv-none-elf-gdb",
+            "miDebuggerServerAddress": "localhost:3333",
+            "preLaunchTask": "Debug",
+            "setupCommands": [
+                { "text": "set architecture riscv:rv32" },
+                { "text": "set remotetimeout 10" }
+            ]
+        }
+    ]
+}

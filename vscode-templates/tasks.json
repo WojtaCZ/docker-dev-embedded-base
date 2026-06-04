@@ -1,0 +1,67 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build",
+            "type": "shell",
+            "command": "/opt/embedded/run-profile-task.sh build",
+            "group": { "kind": "build", "isDefault": true },
+            "presentation": { "reveal": "always", "panel": "shared" },
+            "problemMatcher": ["$gcc"]
+        },
+        {
+            "label": "Build (Debug)",
+            "type": "shell",
+            "command": "/opt/embedded/run-profile-task.sh buildDebug",
+            "group": "build",
+            "presentation": { "reveal": "always", "panel": "shared" },
+            "problemMatcher": ["$gcc"]
+        },
+        {
+            "label": "Clean",
+            "type": "shell",
+            "command": "/opt/embedded/run-profile-task.sh clean",
+            "presentation": { "reveal": "always", "panel": "shared" }
+        },
+        {
+            "label": "Flash",
+            "type": "shell",
+            "command": "/opt/embedded/run-profile-task.sh flash",
+            "dependsOn": "Build",
+            "presentation": { "reveal": "always", "panel": "shared" }
+        },
+        {
+            "label": "Erase chip",
+            "type": "shell",
+            "command": "/opt/embedded/run-profile-task.sh erase",
+            "presentation": { "reveal": "always", "panel": "shared" }
+        },
+        {
+            "label": "Reset target",
+            "type": "shell",
+            "command": "/opt/embedded/run-profile-task.sh reset",
+            "presentation": { "reveal": "always", "panel": "shared" }
+        },
+        {
+            "label": "Serial monitor",
+            "type": "shell",
+            "command": "/opt/embedded/run-profile-task.sh serial",
+            "presentation": { "reveal": "always", "panel": "dedicated", "focus": true }
+        },
+        {
+            "label": "Debug",
+            "type": "shell",
+            "command": "/opt/embedded/run-profile-task.sh debugServer",
+            "isBackground": true,
+            "presentation": { "reveal": "always", "panel": "dedicated" },
+            "problemMatcher": {
+                "pattern": { "regexp": "^$" },
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": "^Open On-Chip Debugger|^Info : Listening on port",
+                    "endsPattern": "^Info : Listening on port 3333"
+                }
+            }
+        }
+    ]
+}
