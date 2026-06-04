@@ -42,9 +42,10 @@ RUN cd /tmp && \
 USER root
 
 # Probe CLI tools (work against any target architecture in any leaf)
-RUN su aurbuild -c "paru -S --noconfirm --needed \
+# Use -bin variants where available — avoids compiling Rust/C++ from source on CI runners.
+RUN su aurbuild -c "paru -S --noconfirm --needed --skipreview \
         blackmagic \
-        probe-rs \
+        probe-rs-bin \
         picotool \
         wlink-bin"
 
