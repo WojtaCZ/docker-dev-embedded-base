@@ -138,73 +138,61 @@ so **a probe plugged in after `dev-up.sh` will not appear**. Restart the contain
 architecture-neutral and lets `arm` and `wch` share one cache of ~1.5 GB of
 probe/analysis tooling.
 
-### 5. ⚠ Verified defect: this image cannot currently build
+### 5. Resolved: the package names that stopped this image building
 
-I checked every `pacman` and AUR package name against the live Arch and AUR
-package databases (2026-09-02). **Seven names do not resolve**, and `pacman -S`
-aborts the whole transaction on the first unknown target, so the `RUN` layer
-fails and no descendant image can build either.
+A 2026-09-02 audit against the live Arch and AUR databases found **seven package
+names that did not resolve**. Because `pacman -S` aborts the whole transaction on
+the first unknown target, the `RUN` layer failed and no descendant image could
+build either. That is fixed; the image builds and publishes from CI. Recorded
+here because the reasoning still explains why the package list looks as it does.
 
-#### Official-repo names that do not exist
-
-| Name in Dockerfile | Status | Fix |
+| Was | Problem | What the Dockerfile does now |
 | --- | --- | --- |
-| `gdb-multiarch` | **Not in Arch** (that is the Debian name) | Use **`gdb`**. Arch's `gdb` has been built with `--enable-targets=all --enable-multilib` since June 2024, so it *is* the multiarch GDB. |
-| `clang-tools-extra` | **Not in Arch** | **Delete the line.** Arch's `clang` package already ships `clangd`, `clang-tidy`, `clang-format`, `clang-query`, `run-clang-tidy`. |
-| `python-pyocd` | **AUR only** | Prefer `uv tool install pyocd` (this image already has `uv`), or install from AUR. |
-| `tio` | **AUR only** | Install from AUR, or drop it — `picocom`, `minicom`, `screen` are all present already. |
+| `gdb-multiarch` | Debian name, not in Arch | `gdb` — Arch builds it with `--enable-targets=all --enable-multilib`, so it *is* the multiarch gdb. Asserted by the smoke test. |
+| `clang-tools-extra` | Not a separate Arch package | Dropped. Arch's `clang` already ships `clangd`, `clang-tidy`, `clang-format`. |
+| `python-pyocd` | AUR only | `uv tool install pyocd`, with `PYOCD_HOME=/opt/pyocd` so packs persist in a volume. |
+| `tio` | AUR only | Dropped. `picocom`, `minicom`, `screen` and `socat` are all present. |
+| `probe-rs-bin` | Not in AUR | `probe-rs` is in `extra` as of 0.32 — installed with pacman, no AUR round-trip. |
+| `blackmagic` | Not in AUR | Dropped. BMP needs no host package; it exposes a GDB server on `/dev/ttyACM*`. |
+| `wlink-bin` | Not in AUR | Belongs in the `wch` leaf, not the shared base. |
 
-#### AUR names that do not exist
+Removing the last AUR dependency also removed the `paru-bin` bootstrap, which
+had been a full `makepkg` cycle on every CI build. The smoke test asserts no
+build user is left behind.
 
-| Name in Dockerfile | Status | Fix |
-| --- | --- | --- |
-| `probe-rs-bin` | **Not in AUR** | **`probe-rs` is now in Arch `extra` (0.32.0).** Move it to the `pacman` list and drop the AUR round-trip entirely. |
-| `blackmagic` | **Not in AUR** | Drop it. BMP needs no host package — it exposes a GDB server directly on `/dev/ttyACM0`. Only `blackmagic-raw-sdk` exists in AUR and it is an unrelated Blackmagic Design product. |
-| `wlink-bin` | **Not in AUR** | AUR has **`wlink`** (0.1.2), a from-source cargo build. It is WCH-only — move it to the `wch` leaf rather than paying for it in the shared base. |
-| `picotool` | In AUR ✓ | Works, but builds from source against pico-sdk — slow. RP2040-only; consider moving to a leaf. |
-| `paru-bin` | In AUR ✓ | Currently flagged out-of-date upstream. |
-
-#### Suggested corrected package block
-
-```dockerfile
-RUN pacman -Syu --noconfirm && \
-    pacman -S --noconfirm --needed \
-        gdb \
-        openocd \
-        stlink \
-        probe-rs \
-        clang lld llvm cppcheck \
-        cmake ninja make dtc jq \
-        picocom screen minicom \
-        usbutils libusb libusb-compat hidapi \
-        dfu-util \
-        fakeroot patch \
-    && pacman -Scc --noconfirm
-
-# pyocd from PyPI — brings CMSIS-Pack support with it
-RUN uv tool install pyocd --with cmsis-pack-manager
-```
-
-After that, the only remaining AUR need in this image is `tio` (optional) — which
-means the entire `paru-bin` bootstrap (a full `makepkg` cycle, several minutes of
-CI time) can be deleted from the base and pushed down to whichever leaf still
-needs it.
+A second defect found on 2026-09-18, while first running the CI smoke test
+end to end: `pacman-key --populate` alone could not repair the inherited trust
+database ("no secret key available to sign with"), leaving every Arch developer
+key at `[marginal]` and any package they signed rejected as corrupt. The
+Dockerfile now runs `pacman-key --init && pacman-key --populate archlinux`.
 
 ### 6. Other verified issues
 
-| # | Severity | Finding |
-| --- | --- | --- |
-| B1 | **High** | Build-breaking package names — §5. |
-| B2 | **High** | `settings.json` declares `fetch` as `npx -y @modelcontextprotocol/server-fetch`. **That npm package does not exist** (registry returns 404). The fetch MCP is Python-only: use `uvx mcp-server-fetch`. Same bug is copied into `arm` and `web`. |
-| B3 | Medium | The `aurbuild` user and its NOPASSWD sudoers entry are **left in the final image**. A second passwordless-sudo account with a home directory full of build artefacts is dead weight and needless attack surface. Delete the user and `/etc/sudoers.d/aurbuild` at the end of the AUR stage. |
-| B4 | Medium | `COPY udev-rules/ /etc/udev/rules.d/` puts the rules in the image, where they can never fire — udev does not run in a container. Harmless, but it invites the belief that they are active. Move them to `/opt/embedded/udev-rules/` and have `probe-troubleshoot` point at them. |
-| B5 | Medium | `launch.json` references `${env:OPENOCD_INTERFACE}` / `${env:OPENOCD_TARGET}` / `${env:SVD_FILE}`, but those values live in `.mcu-profile.json`, and nothing ever exports them into the environment. **Cortex-Debug launches will fail** unless the user sets them by hand. Either have `run-profile-task.sh` emit a `.env` file that `launch.json` consumes via `"envFile"`, or generate `launch.json` from the profile in `/scaffold-mcu-project`. |
-| B6 | Medium | `launch.json`'s RISC-V configuration hard-codes `/usr/bin/riscv-none-elf-gdb`, but the WCH leaf installs that toolchain from AUR under `/opt/riscv-none-elf-gcc/bin/`. Path is likely wrong. |
-| B7 | Low | `run-profile-task.sh` does `exec bash -c "$CMD"` on a string from a workspace file. That is arbitrary code execution from repo content — acceptable given you already run `--dangerously-skip-permissions`, but worth a comment in the script so it is a decision rather than an accident. |
-| B8 | Low | `run-profile-task.sh` does not validate `$1` is present; `run-profile-task.sh` with no argument fails on `set -u` with an opaque message. |
-| B9 | Low | The `Debug` task's `problemMatcher.endsPattern` matches `Listening on port 3333`, but openocd prints `Info : Listening on port 3333 for gdb connections` **before** `Listening on port 4444`. Fine in practice; brittle if openocd's output order changes. |
-| B10 | Low | No `.svd` files anywhere in the fleet, and `register-decode-svd` depends on one. See §7.4. |
-| B11 | Info | Base `dev-up.sh` builds an image the README then says not to use. Consider dropping it or renaming to `test-base.sh`. |
+Status as of 2026-09-18, after the CI smoke test was run end to end for the
+first time. Most of these are closed; the open ones are called out as such.
+
+| # | Severity | Finding | Status |
+| --- | --- | --- | --- |
+| B1 | High | Build-breaking package names — §5. | **Resolved** |
+| B2 | High | `fetch` was declared as `npx -y @modelcontextprotocol/server-fetch`; that npm package does not exist. The fetch MCP is Python-only. | **Resolved** — `uvx mcp-server-fetch`, asserted by the smoke test. |
+| B3 | Medium | The `aurbuild` user and its NOPASSWD sudoers entry were left in the final image. | **Resolved** — the AUR stage is gone entirely; the smoke test asserts no build user remains. |
+| B4 | Medium | `COPY udev-rules/ /etc/udev/rules.d/` put the rules where they can never fire — udev does not run in a container. | **Resolved** — they live in `/opt/embedded/udev-rules/` and `install-host-udev-rules.sh` installs them on the *host*. |
+| B5 | Medium | `launch.json` referenced `${env:OPENOCD_TARGET}` and friends, which nothing ever exported. Cortex-Debug launches would fail. | **Resolved** — `mcu --export` writes `.vscode/.profile.env` and every configuration consumes it via `envFile`. |
+| B6 | Medium | `launch.json`'s RISC-V configuration hard-coded `/usr/bin/riscv-none-elf-gdb`, which is not where the WCH leaf installs it. | **Resolved** — the hard-coded path is gone. |
+| B7 | Low | `run-profile-task.sh` runs a command string from a workspace file through `bash -c`: arbitrary code execution from repo content. | **Resolved as documented** — still true by design, now stated in the script so it is a decision rather than an accident. |
+| B8 | Low | `run-profile-task.sh` did not validate `$1`, so a bare invocation failed on `set -u` with an opaque message. | **Resolved** — it dies with a usage line. |
+| B9 | Low | The `Debug` task's `problemMatcher.endsPattern` matches openocd's `Listening on port 3333`, whose ordering is not guaranteed. | **Open** — works in practice, brittle if openocd's output order changes. |
+| B10 | Low | No `.svd` files anywhere in the fleet, though `register-decode-svd` depends on one. | **Resolved** — the image ships an SVD store under `/opt/svd` with `svd-find` to search it. |
+| B11 | Info | Base `dev-up.sh` builds an image the README then tells you not to use. | **Open** — harmless, still worth renaming. |
+
+A further defect surfaced on 2026-09-18 and is worth recording because it had
+never been caught: `embedded_artifacts()` promised ".hex / .bin next to the .elf"
+but nothing set that extension, so the linked image was just `firmware` while
+the `ELF` key in `.mcu-profile.json`, `mcu size`, `mcu test`, the launch template
+and the scaffold command all expected `build/firmware.elf`. `mcu size` therefore
+failed on a project that had just built successfully. `CMAKE_EXECUTABLE_SUFFIX`
+set in a toolchain file does not survive `enable_language()` — verified, it reads
+back empty — so the suffix is now a target property set by `embedded_artifacts()`.
 
 ### 7. Proposed features
 
