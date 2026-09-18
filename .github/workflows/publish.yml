@@ -7,8 +7,12 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
-  repository_dispatch:
-    types: [base-image-updated]
+  # Weekly rebuild. This is what keeps the chain fresh: there is no
+  # cross-repo dispatch any more, and a rebuild also picks up Arch package
+  # updates, which a change-triggered build would never do on its own.
+  # Staggered so a parent finishes before its children start (template 03:00, base 04:00, leaves 05:00 UTC Mondays).
+  schedule:
+    - cron: '0 4 * * 1'
 
 permissions:
   contents: read
@@ -90,34 +94,6 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      # Tell the parent that its image is verified downstream, so :stable can move.
-      - name: Report upstream
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ secrets.DOWNSTREAM_DISPATCH_PAT }}
-        run: |
-          gh api repos/WojtaCZ/docker-dev-template/dispatches \
-             -f event_type=downstream-verified
-
-      # The image is already published by this point, so a failed fan-out must
-      # not fail the run: it means leaf images rebuild late, not that this one
-      # is bad. Each dispatch is independent and warns for itself.
-      - name: Notify leaf images
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ secrets.DOWNSTREAM_DISPATCH_PAT }}
-        run: |
-          for repo in docker-dev-embedded-arm docker-dev-embedded-wch; do
-            if gh api "repos/WojtaCZ/$repo/dispatches" -f event_type=base-image-updated >/dev/null; then
-              echo "dispatched base-image-updated -> $repo"
-            else
-              echo "::warning::could not dispatch to $repo -- DOWNSTREAM_DISPATCH_PAT may lack access to it"
-            fi
-          done
-
   # Shared assets in this repo are the source of truth for the copies carried by
   # docker-dev-embedded-telink. Warn when they drift.
   asset-drift:
@@ -127,16 +103,15 @@ jobs:
       - uses: actions/checkout@v7
         with:
           path: base
-      # The sibling repo is private and the repo-scoped GITHUB_TOKEN cannot see
-      # it, so this checkout 404s unless DOWNSTREAM_DISPATCH_PAT is available.
-      # Report that as a skip rather than a red annotation on every run.
+      # docker-dev-embedded-telink is still private, so this checkout 404s for a
+      # repo-scoped token. Report that as a skip rather than a red annotation on
+      # every run; it starts working by itself if that repo is made public too.
       - id: telink
         continue-on-error: true
         uses: actions/checkout@v7
         with:
           repository: WojtaCZ/docker-dev-embedded-telink
           path: docker-dev-embedded-telink
-          token: ${{ secrets.DOWNSTREAM_DISPATCH_PAT || github.token }}
       - name: Check shared assets are in sync
         if: steps.telink.outcome == 'success'
         run: |
