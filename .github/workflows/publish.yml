@@ -18,12 +18,12 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -42,7 +42,7 @@ jobs:
           echo "shell + JSON assets OK"
 
       - id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
@@ -55,7 +55,7 @@ jobs:
 
       # Build locally first — nothing is published unless the smoke tests pass.
       - name: Build (local, for smoke test)
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           load: true
@@ -71,7 +71,7 @@ jobs:
 
       - name: Push
         if: github.event_name != 'pull_request'
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: true
@@ -107,15 +107,26 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: base
-      - uses: actions/checkout@v4
+      # The sibling repo is private and the repo-scoped GITHUB_TOKEN cannot see
+      # it, so this checkout 404s unless DOWNSTREAM_DISPATCH_PAT is available.
+      # Report that as a skip rather than a red annotation on every run.
+      - id: telink
+        continue-on-error: true
+        uses: actions/checkout@v7
         with:
           repository: WojtaCZ/docker-dev-embedded-telink
           path: docker-dev-embedded-telink
+          token: ${{ secrets.DOWNSTREAM_DISPATCH_PAT || github.token }}
       - name: Check shared assets are in sync
+        if: steps.telink.outcome == 'success'
         run: |
           mv base docker-dev-embedded-base
           ./docker-dev-embedded-base/scripts/sync-shared-assets.sh --check \
             "$PWD/docker-dev-embedded-telink"
+      - name: Drift check skipped
+        if: steps.telink.outcome != 'success'
+        run: |
+          echo "::notice::docker-dev-embedded-telink is not reachable from this workflow; shared-asset drift check skipped."
