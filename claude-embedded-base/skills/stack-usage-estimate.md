@@ -2,6 +2,10 @@
 
 Estimate worst-case stack depth using compiler-generated `.su` files and manual call-graph analysis.
 
+> Binutils calls below use `${CROSS_PREFIX}`, exported by each leaf image
+> (`arm-none-eabi-` on the arm leaf, `riscv-none-elf-` on wch). It is empty in
+> `embedded-base`, where the host binutils are used instead.
+
 ## Step 1: Enable stack usage output
 
 In CMakeLists.txt, add:
@@ -28,7 +32,7 @@ Format: `source_file:line:col:function_name   N   static/dynamic/bounded`
 For each execution context (main loop, each ISR, each RTOS task):
 
 ```bash
-arm-none-eabi-objdump -d build/firmware.elf | grep -A2 "bl\b\|blx\b\|bl\." | head -60
+${CROSS_PREFIX}objdump -d build/firmware.elf | grep -A2 "bl\b\|blx\b\|bl\." | head -60
 ```
 
 Or use `cflow` if available:
@@ -54,8 +58,8 @@ Add ISR overhead (Cortex-M: 8 registers × 4 bytes = 32 bytes pushed by hardware
 ## Step 5: Compare against linker script allocation
 
 ```bash
-arm-none-eabi-nm build/firmware.elf | grep -E "_estack|_Min_Stack_Size|_stack_size"
-arm-none-eabi-size build/firmware.elf
+${CROSS_PREFIX}nm build/firmware.elf | grep -E "_estack|_Min_Stack_Size|_stack_size"
+${CROSS_PREFIX}size build/firmware.elf
 ```
 
 Check that `(worst-case stack depth) + (RTOS overhead if any) + (safety margin ~256 bytes)` fits within the allocated stack region.

@@ -1,17 +1,20 @@
 # docker-dev-embedded-base
 
 Shared foundation for all embedded development containers. Inherits from
-[docker-dev-template](https://github.com/wojtacz/docker-dev-template) and adds
+[docker-dev-template](https://github.com/WojtaCZ/docker-dev-template) and adds
 every probe driver, debug tool, and C++ analysis utility that is useful across
 all target architectures. Compiler toolchains live in the per-architecture leaf
 images — this image has none.
+
+> Architecture notes, known issues and design rationale for the whole fleet:
+> [`WRITEUP.md`](WRITEUP.md).
 
 ## Repository hierarchy
 
 ```
 docker-dev-template            (Arch Linux + Claude Code)
   └── docker-dev-embedded-base (this image — probe tools, skills, VSCode templates)
-       ├── docker-dev-embedded-arm     (arm-none-eabi-g++, CMSIS, CMSIS-DSP)
+       ├── docker-dev-embedded-arm     (arm-none-eabi-g++, CMSIS, CMSIS-DSP, STM32 headers)
        └── docker-dev-embedded-wch     (riscv-none-elf-g++, ch32v003fun)
 
 docker-dev-template
@@ -23,12 +26,29 @@ for firmware development.
 
 ## What's in this image
 
-- **Debug probes:** openocd, stlink, pyocd, Black Magic Probe CLI, probe-rs, picotool, wlink
-- **GDB:** gdb-multiarch (ARM, RISC-V, and beyond)
+- **Debug probes:** openocd, stlink, pyocd (+ CMSIS-Pack), probe-rs, dfu-util
+- **GDB:** `gdb`, built `--enable-targets=all` — it *is* the multiarch gdb on Arch
 - **C++ analysis:** clangd, clang-format, clang-tidy, cppcheck
-- **Build:** cmake, ninja, make
-- **Serial console:** picocom, tio, screen, minicom
-- **Claude Code** with 10 embedded-specific skills and 2 commands
+- **Build:** cmake, ninja, make, meson, ccache
+- **Host unit testing:** GoogleTest, Catch2, gcovr, lcov
+- **Serial console:** picocom, minicom, screen, socat
+- **SVD store:** ~700 files at `/opt/svd`, searchable with `svd-find`
+- **Claude Code** with 11 embedded skills and 2 commands
+
+> There is no AUR helper in this image. Everything above has an official Arch
+> package, so the `paru-bin` bootstrap was removed — several minutes off every
+> CI build. Leaves that genuinely need AUR (wch) bootstrap their own.
+
+## Which flash tool?
+
+| Target | Tool | Why |
+| --- | --- | --- |
+| Most STM32 (F/G/L/WB55/WL), RP2040, nRF, SAM | `openocd` | Well supported by 0.12.0 |
+| **STM32WBA5x / WBA6x (incl. WBA65), U5, H5, C0, N6** | **`probe-rs`** | OpenOCD 0.12 does not know these parts — WBA65 fails with `auto_probe failed` |
+| Brand-new silicon of any vendor | `pyocd` + `pyocd pack install <part>` | CMSIS-Pack tracks new devices fastest, and brings the SVD with it |
+
+Set `flashTool` in `.mcu-profile.json` accordingly; `/scaffold-mcu-project`
+picks the right one from the part number.
 
 ## One-time host setup (run once per Linux host)
 
@@ -40,55 +60,170 @@ sudo ./scripts/install-host-udev-rules.sh
 sudo usermod -aG dialout,plugdev $USER
 ```
 
-> **Note:** udev does not run inside Docker containers. The udev rules in this
-> repo must also be installed on the host so that `/dev/bus/usb` node ownership
-> is correct when bind-mounted into the container.
+> **Note:** udev does not run inside Docker containers. The rules ship at
+> `/opt/embedded/udev-rules/` inside the image purely so you can extract and
+> install them on the host — they are inert in the container itself.
 
-## Usage (as a developer using a leaf image)
+Verify from inside the container with `dev-doctor` or `/probe-detect`. Note that
+`/dev/bus/usb` is bind-mounted at container start, so a probe plugged in
+afterwards will not appear until you restart the container.
 
-Use the leaf image's `dev-up.sh`. This base image's `dev-up.sh` is provided
-for testing the base layer only.
+## The `mcu` task runner
+
+`.mcu-profile.json` in the workspace root parameterises everything. One
+chip-agnostic `tasks.json` drives it through `/opt/embedded/run-profile-task.sh`,
+aliased to **`mcu`**.
 
 ```bash
-# Build and start (pulls latest base layer by default)
-./scripts/dev-up.sh
-
-# Mount a specific project directory
-./scripts/dev-up.sh /path/to/firmware
-
-# Offline / pinned — don't pull base image
-DEV_NO_PULL=1 ./scripts/dev-up.sh
-
-# Pass through a specific probe TTY (BMP second serial port)
-DEV_PROBE=/dev/ttyACM1 ./scripts/dev-up.sh
+mcu --schema        # full key reference (profile.schema.json)
+mcu --list          # tasks and settings in this workspace
+mcu build           # runs .build, then the .postBuild chain
+mcu size            # section sizes, enforced against .sizeBudget
+mcu flash
+mcu rtt             # stream RTT from the running target
+mcu test            # flash, capture output, assert on testPass/testFail
+mcu hostTest        # native x86 unit tests, no hardware
+mcu --export        # write .vscode/.profile.env + a .clangd fallback
+mcu --print flash   # show a command without running it
 ```
+
+Two keys are **built in** and work even when the profile does not define them:
+
+- **`size`** — reports `.text`/`.rodata`/`.data`/`.bss` and fails the build when
+  `sizeBudget.flash` or `sizeBudget.ram` is exceeded. Put `"postBuild": ["size"]`
+  in the profile and binary-size creep stops being invisible.
+- **`test`** — flashes, captures target output (RTT if defined, otherwise the
+  serial console) for `testTimeout` seconds, then asserts `testPass` / `testFail`
+  regexes. This is what closes the loop so an agent can iterate against real
+  silicon unattended.
+
+### Profile → environment bridge
+
+`launch.json` reads `OPENOCD_TARGET`, `SVD_FILE`, `BMP_PORT` and friends through
+`"envFile": "${workspaceFolder}/.vscode/.profile.env"`. That file is generated by
+`mcu --export`, which the `Debug` task runs automatically. Editing
+`.mcu-profile.json` is therefore enough — you never edit `launch.json` to change
+chips.
+
+## SVD files
+
+```bash
+svd-find                     # what stores exist and how many files each holds
+svd-find stm32f407           # fuzzy search, best match first
+svd-find --set stm32f407     # write the best match into .mcu-profile.json
+svd-find --pack stm32wba65   # fall back to the CMSIS-Pack index via pyocd
+```
+
+The base store is [cmsis-svd/cmsis-svd-data](https://github.com/cmsis-svd/cmsis-svd-data)
+(multi-vendor). The arm leaf adds modm-io's STM32 mirror on top. Very recent
+parts are in neither — use `--pack`.
+
+## Host-side unit tests
+
+Hardware-independent logic (parsers, state machines, ring buffers, fixed-point
+maths) does not need silicon to be tested, and testing it natively is far faster
+than a flash cycle:
+
+```bash
+cmake -S . -B build-host -G Ninja -DHOST_TESTS=ON
+cmake --build build-host && ctest --test-dir build-host --output-on-failure
+```
+
+`/opt/embedded/cmake/host-test.cmake` provides `add_host_test_suite()` with
+GoogleTest or Catch2, the same warning discipline as the firmware build, and a
+`<name>-coverage` target when gcovr is present.
+
+## CMake helpers
+
+`/opt/embedded/cmake/embedded-common.cmake`:
+
+| Function | What it does |
+| --- | --- |
+| `embedded_hardening(tgt)` | C++20, `-fno-exceptions/-rtti/-threadsafe-statics`, `--gc-sections`, map file, `--print-memory-usage`, the full warning set |
+| `embedded_artifacts(tgt)` | `.hex` + `.bin` + a size report after every build |
+| `embedded_stack_usage(tgt)` | `-fstack-usage`, feeding the `stack-usage-estimate` skill |
+| `find_cmsis_dsp(core out)` | Select the CMSIS-DSP build matching the target core (arm leaf) |
+
+## dev-doctor
+
+```bash
+dev-doctor           # table of every check
+dev-doctor --json    # machine-readable; non-zero exit on any FAIL
+```
+
+This layer adds checks for probe tooling, gdb multiarch support, the SVD store,
+the `mcu` runner, VSCode templates, USB passthrough, group membership, and the
+cross toolchain declared by `$CROSS_PREFIX`. CI runs it before publishing.
+
+## Claude assets
+
+**Commands**
+
+| Command | Function |
+| --- | --- |
+| `/scaffold-mcu-project <arm\|wch\|telink> <part>` | Resolves core/FPU/memory/flash-tool from the part number, writes `.vscode/*`, `.mcu-profile.json`, a CMake toolchain file with the right `-mcpu`, and verifies the result builds |
+| `/probe-detect` | Full probe diagnostic and the specific next command to try |
+
+**Skills (11)** — all architecture-neutral:
+
+`clock-tree-derive` · `cpp-embedded-conventions` · `cpp-template-bloat-audit` ·
+`firmware-binary-diff` · `gdb-debug-session` · `hardfault-decode` ·
+`interrupt-priority-audit` · `linker-script-audit` · `probe-troubleshoot` ·
+`register-decode-svd` · `stack-usage-estimate`
+
+Binutils invocations in these skills use `${CROSS_PREFIX}`, which each leaf
+exports (`arm-none-eabi-`, `riscv-none-elf-`), so they work unchanged on every
+architecture.
+
+## Claude settings layering
+
+This image contributes `~/.claude-layers/10-embedded.json`, declaring only what
+it *adds* to the baseline MCP set (the `fetch` server, via `uvx mcp-server-fetch`
+— note that `@modelcontextprotocol/server-fetch` does not exist on npm). The
+template's entrypoint merges every layer into `~/.claude/settings.json` at
+container start.
+
+## Shared assets and Telink
+
+`udev-rules/`, `run-profile-task.sh`, `vscode-templates/`, `profile.schema.json`
+and `cmake/` are owned by **this** repo, and copied into
+`docker-dev-embedded-telink` (which branches off the template, not this image).
+
+```bash
+./scripts/sync-shared-assets.sh --check   # report drift, non-zero if any
+./scripts/sync-shared-assets.sh           # resync sibling checkouts
+```
+
+CI runs the `--check` form as a non-blocking job.
 
 ## Template update propagation
 
-This image tracks `ghcr.io/wojtacz/docker-dev-template:latest` via a floating
-`FROM` tag. On every `dev-up.sh` run the `--pull` flag causes Docker to check
-for a fresher base layer.
+This image tracks `ghcr.io/wojtacz/docker-dev-template:${BASE_TAG}` (default
+`latest`; build with `--build-arg BASE_TAG=stable` for the promoted channel).
+`dev-up.sh` passes `--pull` so every run checks for a fresher base layer.
 
-CI additionally: when `docker-dev-template` pushes to `main` it fires a
-`repository_dispatch` event here, which triggers a rebuild and republish of
-this image. That republish in turn dispatches to the `arm` and `wch` leaves.
+CI additionally: a push to `main` in `docker-dev-template` fires a
+`repository_dispatch` here, which rebuilds and republishes this image, which in
+turn dispatches to the `arm` and `wch` leaves — and reports `downstream-verified`
+back to the template so its `:stable` tag can advance.
 
 ### Setting up the dispatch PAT
 
 1. Create a fine-grained PAT with `Contents: Read and Write` on
-   `docker-dev-embedded-arm` and `docker-dev-embedded-wch`.
-2. Add it as `DOWNSTREAM_DISPATCH_PAT` secret on this repo.
-3. Add the same PAT as `DOWNSTREAM_DISPATCH_PAT` on `docker-dev-template`
-   (targeting this repo and `docker-dev-embedded-telink`).
+   `docker-dev-embedded-arm`, `docker-dev-embedded-wch` and `docker-dev-template`.
+2. Add it as the `DOWNSTREAM_DISPATCH_PAT` secret on this repo.
+3. Add the equivalent PAT on `docker-dev-template` (targeting this repo,
+   `docker-dev-embedded-telink` and `docker-dev-web`).
 
-## VSCode task template
+## Usage
 
-The shared `vscode-templates/tasks.json` and `launch.json` are baked into the
-image at `/opt/embedded/vscode-templates/`. Leaf images ship a default
-`profile.json` at `/opt/embedded/profile.json`. The `/scaffold-mcu-project`
-Claude command copies both into the workspace and generates a CMakeLists.txt
-skeleton.
+Use the leaf image's `dev-up.sh`. This base image's `dev-up.sh` is for testing
+the base layer only.
 
-Task execution goes through `/opt/embedded/run-profile-task.sh` which reads
-`.mcu-profile.json` from the workspace root — edit that file to customise
-commands per project without touching `tasks.json`.
+```bash
+./scripts/dev-up.sh                    # build and start, workspace = $(pwd)
+./scripts/dev-up.sh /path/to/firmware  # mount a specific project
+DEV_NO_PULL=1 ./scripts/dev-up.sh      # offline / pinned
+DEV_DOCTOR=1 ./scripts/dev-up.sh       # run dev-doctor and exit
+DEV_PROBE=/dev/ttyACM1 ./scripts/dev-up.sh   # pass a specific probe TTY
+```

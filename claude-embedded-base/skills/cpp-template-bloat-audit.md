@@ -2,10 +2,14 @@
 
 Find template instantiation explosions that inflate binary size on resource-constrained targets.
 
+> Binutils calls below use `${CROSS_PREFIX}`, exported by each leaf image
+> (`arm-none-eabi-` on the arm leaf, `riscv-none-elf-` on wch). It is empty in
+> `embedded-base`, where the host binutils are used instead.
+
 ## Step 1: Sort symbols by size
 
 ```bash
-arm-none-eabi-nm -C --size-sort --print-size build/firmware.elf \
+${CROSS_PREFIX}nm -C --size-sort --print-size build/firmware.elf \
     | grep " T \| t " \
     | tail -40
 ```
@@ -24,7 +28,7 @@ A large count for a template instantiation suggests the compiler is not sharing 
 
 ```bash
 # Total text size contributed by each translation unit
-arm-none-eabi-objdump -t build/firmware.elf \
+${CROSS_PREFIX}objdump -t build/firmware.elf \
     | awk '/\.text/ {sum[$NF]+=$5} END {for(f in sum) printf "%8d  %s\n", sum[f], f}' \
     | sort -rn | head -20
 ```
@@ -81,4 +85,4 @@ void serialize(T val) {
 
 ## Benchmark
 
-After each change: `arm-none-eabi-size build/firmware.elf` — compare `.text` before and after.
+After each change: `${CROSS_PREFIX}size build/firmware.elf` — compare `.text` before and after.

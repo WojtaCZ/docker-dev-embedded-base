@@ -2,6 +2,10 @@
 
 Compare two firmware builds and report function-level size changes, vector table differences, and `.rodata` deltas.
 
+> Binutils calls below use `${CROSS_PREFIX}`, exported by each leaf image
+> (`arm-none-eabi-` on the arm leaf, `riscv-none-elf-` on wch). It is empty in
+> `embedded-base`, where the host binutils are used instead.
+
 ## Prerequisites
 
 Two built `.elf` files to compare:
@@ -12,9 +16,9 @@ Two built `.elf` files to compare:
 
 ```bash
 # Extract text symbols with sizes from both builds
-arm-none-eabi-nm -C --size-sort --print-size build_before/firmware.elf \
+${CROSS_PREFIX}nm -C --size-sort --print-size build_before/firmware.elf \
     | grep " [Tt] " | awk '{print $2, $4}' | sort -k2 > /tmp/before.txt
-arm-none-eabi-nm -C --size-sort --print-size build_after/firmware.elf \
+${CROSS_PREFIX}nm -C --size-sort --print-size build_after/firmware.elf \
     | grep " [Tt] " | awk '{print $2, $4}' | sort -k2 > /tmp/after.txt
 
 # Show changed functions
@@ -30,8 +34,8 @@ diff /tmp/before.txt /tmp/after.txt | grep "^[<>]" \
 ## Step 2: Overall section size delta
 
 ```bash
-echo "=== BEFORE ===" && arm-none-eabi-size build_before/firmware.elf
-echo "=== AFTER ===" && arm-none-eabi-size build_after/firmware.elf
+echo "=== BEFORE ===" && ${CROSS_PREFIX}size build_before/firmware.elf
+echo "=== AFTER ===" && ${CROSS_PREFIX}size build_after/firmware.elf
 ```
 
 ## Step 3: Vector table diff (ARM Cortex-M)
@@ -39,16 +43,16 @@ echo "=== AFTER ===" && arm-none-eabi-size build_after/firmware.elf
 The vector table is at the start of `.text` at FLASH origin. A changed vector entry means a handler was added, removed, or renamed.
 
 ```bash
-arm-none-eabi-objdump -d build_before/firmware.elf | head -50 > /tmp/vtable_before.txt
-arm-none-eabi-objdump -d build_after/firmware.elf  | head -50 > /tmp/vtable_after.txt
+${CROSS_PREFIX}objdump -d build_before/firmware.elf | head -50 > /tmp/vtable_before.txt
+${CROSS_PREFIX}objdump -d build_after/firmware.elf  | head -50 > /tmp/vtable_after.txt
 diff /tmp/vtable_before.txt /tmp/vtable_after.txt
 ```
 
 ## Step 4: `.rodata` delta (strings, lookup tables)
 
 ```bash
-arm-none-eabi-objdump -s -j .rodata build_before/firmware.elf > /tmp/rodata_before.txt
-arm-none-eabi-objdump -s -j .rodata build_after/firmware.elf  > /tmp/rodata_after.txt
+${CROSS_PREFIX}objdump -s -j .rodata build_before/firmware.elf > /tmp/rodata_before.txt
+${CROSS_PREFIX}objdump -s -j .rodata build_after/firmware.elf  > /tmp/rodata_after.txt
 diff /tmp/rodata_before.txt /tmp/rodata_after.txt | head -40
 ```
 
@@ -56,8 +60,8 @@ diff /tmp/rodata_before.txt /tmp/rodata_after.txt | head -40
 
 ```bash
 comm -23 \
-    <(arm-none-eabi-nm -C build_before/firmware.elf | awk '{print $3}' | sort) \
-    <(arm-none-eabi-nm -C build_after/firmware.elf  | awk '{print $3}' | sort)
+    <(${CROSS_PREFIX}nm -C build_before/firmware.elf | awk '{print $3}' | sort) \
+    <(${CROSS_PREFIX}nm -C build_after/firmware.elf  | awk '{print $3}' | sort)
 ```
 
 ## Reporting

@@ -1,0 +1,113 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "https://github.com/WojtaCZ/docker-dev-embedded-base/profile.schema.json",
+    "title": ".mcu-profile.json",
+    "description": "Per-workspace MCU profile read by /opt/embedded/run-profile-task.sh (aliased as `mcu`). Keys split into metadata (scalars, exported to the environment by `mcu --export`) and tasks (command strings, executed by `mcu <key>`).",
+    "type": "object",
+    "properties": {
+        "chip": {
+            "type": "string",
+            "description": "Canonical part number, e.g. STM32WBA65RI, STM32F407VG, CH32V003F4P6. Drives probe-rs --chip, SVD lookup and size budgets."
+        },
+        "core": {
+            "type": "string",
+            "description": "Compiler core name passed as -mcpu / -march, e.g. cortex-m33, cortex-m0plus, rv32ec.",
+            "examples": ["cortex-m0plus", "cortex-m4", "cortex-m33", "cortex-m7", "rv32ec", "rv32imac"]
+        },
+        "fpu": {
+            "type": "string",
+            "description": "Value for -mfpu, or \"none\" for soft-float cores.",
+            "examples": ["none", "fpv4-sp-d16", "fpv5-sp-d16", "fpv5-d16"]
+        },
+        "floatAbi": {
+            "type": "string",
+            "enum": ["soft", "softfp", "hard"],
+            "description": "Value for -mfloat-abi."
+        },
+        "probe": {
+            "type": "string",
+            "enum": ["stlink", "cmsis-dap", "bmp", "xds110", "wlink", "jlink", "picoprobe"],
+            "description": "Physical debug probe in use. Selects the OpenOCD interface config and informs probe-troubleshoot."
+        },
+        "flashTool": {
+            "type": "string",
+            "enum": ["openocd", "probe-rs", "pyocd", "cubeprog", "wlink", "wchisp", "custom"],
+            "description": "Which tool the flash/erase/reset/debugServer tasks drive. Use probe-rs for any part OpenOCD 0.12 does not know (all STM32WBA6x, for example)."
+        },
+        "OPENOCD_INTERFACE": {
+            "type": "string",
+            "description": "OpenOCD interface config, e.g. interface/stlink.cfg. Only used when flashTool is openocd."
+        },
+        "OPENOCD_TARGET": {
+            "type": "string",
+            "description": "OpenOCD target config, e.g. target/stm32f4x.cfg. Only used when flashTool is openocd."
+        },
+        "SVD_FILE": {
+            "type": "string",
+            "description": "Path to the target's CMSIS-SVD file. Leave empty and run `svd-find <chip>` to locate one in /opt/svd."
+        },
+        "BMP_PORT": {
+            "type": "string",
+            "description": "Black Magic Probe GDB serial port, e.g. /dev/ttyACM0."
+        },
+        "PORT": {
+            "type": "string",
+            "description": "Serial console device for the `serial` task."
+        },
+        "BAUD": {
+            "type": ["string", "integer"],
+            "description": "Serial console baud rate. Defaults to 115200."
+        },
+        "ELF": {
+            "type": "string",
+            "description": "Path to the built ELF. Defaults to build/firmware.elf.",
+            "default": "build/firmware.elf"
+        },
+        "rttChannel": {
+            "type": "integer",
+            "description": "SEGGER RTT up-channel to attach to for the `rtt` task.",
+            "default": 0
+        },
+        "sizeBudget": {
+            "type": "object",
+            "description": "Hard limits enforced by the `size` task. It exits non-zero when the firmware exceeds them — the guardrail that stops binary size creeping up unnoticed during unattended development.",
+            "properties": {
+                "flash": { "type": "integer", "description": "Maximum .text + .rodata + .data in bytes." },
+                "ram":   { "type": "integer", "description": "Maximum .data + .bss in bytes (excludes stack/heap)." }
+            },
+            "additionalProperties": false
+        },
+        "testTimeout": {
+            "type": "integer",
+            "description": "Seconds the `test` task captures target output before giving up.",
+            "default": 30
+        },
+        "testPass": {
+            "type": "string",
+            "description": "Regex that must appear in captured target output for the `test` task to pass."
+        },
+        "testFail": {
+            "type": "string",
+            "description": "Regex that, if seen, fails the `test` task immediately."
+        },
+
+        "build":       { "type": "string", "description": "Release build command." },
+        "buildDebug":  { "type": "string", "description": "Debug build command." },
+        "clean":       { "type": "string", "description": "Remove build artefacts." },
+        "flash":       { "type": "string", "description": "Program the target." },
+        "erase":       { "type": "string", "description": "Mass-erase the target." },
+        "reset":       { "type": "string", "description": "Reset and run." },
+        "serial":      { "type": "string", "description": "Open a serial console." },
+        "debugServer": { "type": "string", "description": "Start a GDB server on :3333. Must be a foreground process." },
+        "rtt":         { "type": "string", "description": "Attach to RTT and stream target output to stdout." },
+        "size":        { "type": "string", "description": "Report section sizes. Overrides the built-in budget-checking implementation." },
+        "test":        { "type": "string", "description": "Hardware-in-the-loop test: flash, run, capture, assert." },
+        "hostTest":    { "type": "string", "description": "Native x86 unit tests — no hardware required." },
+        "postBuild":   {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Extra profile keys to run after a successful `build`, e.g. [\"size\", \"hex\"]."
+        }
+    },
+    "additionalProperties": true
+}

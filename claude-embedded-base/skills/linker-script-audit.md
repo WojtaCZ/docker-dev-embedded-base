@@ -2,6 +2,10 @@
 
 Audit the linker script(s) in the workspace against the target chip's actual memory map.
 
+> Binutils calls below use `${CROSS_PREFIX}`, exported by each leaf image
+> (`arm-none-eabi-` on the arm leaf, `riscv-none-elf-` on wch). It is empty in
+> `embedded-base`, where the host binutils are used instead.
+
 ## Steps
 
 1. **Identify the linker script** — look for `*.ld` or `*.lds` in the workspace. If multiple exist, identify which CMakeLists.txt passes via `target_link_options(<target> PRIVATE -T <path>)`.
@@ -34,8 +38,8 @@ Audit the linker script(s) in the workspace against the target chip's actual mem
 
 6. **Verify against build output:**
    ```bash
-   arm-none-eabi-size build/firmware.elf
-   arm-none-eabi-objdump -h build/firmware.elf | head -30
+   ${CROSS_PREFIX}size build/firmware.elf
+   ${CROSS_PREFIX}objdump -h build/firmware.elf | head -30
    ```
    Check that `.text + .data` fits in flash, `.data + .bss + stack` fits in RAM.
 

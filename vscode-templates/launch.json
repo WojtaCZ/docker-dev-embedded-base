@@ -1,32 +1,67 @@
 {
     "version": "0.2.0",
+    "//": [
+        "Every configuration reads its target-specific values from",
+        "${workspaceFolder}/.vscode/.profile.env, which is generated from",
+        ".mcu-profile.json by `mcu --export`. The 'Export profile to .env' task",
+        "runs automatically before Debug, so editing .mcu-profile.json is enough",
+        "— you never edit this file to change chips."
+    ],
     "configurations": [
         {
-            "name": "Debug (Cortex-Debug / openocd)",
+            "name": "Debug (openocd)",
             "type": "cortex-debug",
             "request": "launch",
             "cwd": "${workspaceFolder}",
             "executable": "${workspaceFolder}/build/firmware.elf",
             "servertype": "openocd",
+            "envFile": "${workspaceFolder}/.vscode/.profile.env",
             "configFiles": [
                 "${env:OPENOCD_INTERFACE}",
                 "${env:OPENOCD_TARGET}"
             ],
             "svdFile": "${env:SVD_FILE}",
-            "preLaunchTask": "Debug",
-            "postDebugTask": "",
+            "preLaunchTask": "Build (Debug)",
             "runToEntryPoint": "main",
             "showDevDebugOutput": "none"
         },
         {
-            "name": "Debug (Cortex-Debug / BMP)",
+            "name": "Debug (probe-rs) — use for STM32WBA6x and anything openocd 0.12 lacks",
+            "type": "cortex-debug",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/build/firmware.elf",
+            "servertype": "external",
+            "gdbTarget": "localhost:3333",
+            "envFile": "${workspaceFolder}/.vscode/.profile.env",
+            "svdFile": "${env:SVD_FILE}",
+            "preLaunchTask": "Debug",
+            "runToEntryPoint": "main",
+            "showDevDebugOutput": "none"
+        },
+        {
+            "name": "Debug (Black Magic Probe)",
             "type": "cortex-debug",
             "request": "launch",
             "cwd": "${workspaceFolder}",
             "executable": "${workspaceFolder}/build/firmware.elf",
             "servertype": "bmp",
+            "envFile": "${workspaceFolder}/.vscode/.profile.env",
             "BMPGDBSerialPort": "${env:BMP_PORT}",
             "powerOverBMP": "enable",
+            "svdFile": "${env:SVD_FILE}",
+            "preLaunchTask": "Build (Debug)",
+            "runToEntryPoint": "main"
+        },
+        {
+            "name": "Debug (pyocd)",
+            "type": "cortex-debug",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/build/firmware.elf",
+            "servertype": "pyocd",
+            "envFile": "${workspaceFolder}/.vscode/.profile.env",
+            "targetId": "${env:chip}",
             "svdFile": "${env:SVD_FILE}",
             "preLaunchTask": "Build (Debug)",
             "runToEntryPoint": "main"
@@ -38,13 +73,29 @@
             "program": "${workspaceFolder}/build/firmware.elf",
             "cwd": "${workspaceFolder}",
             "MIMode": "gdb",
-            "miDebuggerPath": "/usr/bin/riscv-none-elf-gdb",
+            "envFile": "${workspaceFolder}/.vscode/.profile.env",
+            "miDebuggerPath": "${env:CROSS_GDB}",
             "miDebuggerServerAddress": "localhost:3333",
             "preLaunchTask": "Debug",
             "setupCommands": [
                 { "text": "set architecture riscv:rv32" },
                 { "text": "set remotetimeout 10" }
             ]
+        },
+        {
+            "name": "Attach (openocd, no reset)",
+            "type": "cortex-debug",
+            "request": "attach",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/build/firmware.elf",
+            "servertype": "openocd",
+            "envFile": "${workspaceFolder}/.vscode/.profile.env",
+            "configFiles": [
+                "${env:OPENOCD_INTERFACE}",
+                "${env:OPENOCD_TARGET}"
+            ],
+            "svdFile": "${env:SVD_FILE}",
+            "showDevDebugOutput": "none"
         }
     ]
 }
