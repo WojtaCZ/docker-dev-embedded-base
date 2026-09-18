@@ -123,8 +123,12 @@ PY
 mcu --schema | jq -e '.title' >/dev/null || fail "mcu --schema broken"
 pass "mcu --schema"
 
-mcu --list | grep -q 'build'      || fail "mcu --list did not show tasks"
-mcu --list | grep -q 'chip=STM32F407VG' || fail "mcu --list did not show settings"
+# Captured, not piped: `mcu --list` writes its sections in several writes and
+# `grep -q` exits on the first match, so under `set -o pipefail` the pipeline
+# reports mcu's SIGPIPE (141) instead of grep's match.
+listing=$(mcu --list)
+grep -q 'build' <<< "$listing"            || fail "mcu --list did not show tasks"
+grep -q 'chip=STM32F407VG' <<< "$listing" || fail "mcu --list did not show settings"
 pass "mcu --list"
 
 mcu --print build | grep -q BUILD_OK || fail "mcu --print broken"

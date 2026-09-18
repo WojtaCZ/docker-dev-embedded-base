@@ -45,6 +45,17 @@ endfunction()
 # .hex / .bin next to the .elf, plus a size report at the end of every build.
 # ---------------------------------------------------------------------------
 function(embedded_artifacts target)
+    # Name the linked image <target>.elf. Everything downstream spells it that
+    # way: the "ELF" key in .mcu-profile.json, mcu's `size` and `test` built-ins,
+    # the VS Code launch template and the scaffold command. CMAKE_EXECUTABLE_SUFFIX
+    # set in a toolchain file does NOT survive enable_language(), so it has to be
+    # a target property. An explicit SUFFIX set by the project wins.
+    get_target_property(_type ${target} TYPE)
+    get_target_property(_suffix ${target} SUFFIX)
+    if(_type STREQUAL "EXECUTABLE" AND NOT _suffix)
+        set_target_properties(${target} PROPERTIES SUFFIX ".elf")
+    endif()
+
     if(NOT CMAKE_OBJCOPY)
         find_program(CMAKE_OBJCOPY ${CMAKE_C_COMPILER_TARGET}-objcopy objcopy REQUIRED)
     endif()
