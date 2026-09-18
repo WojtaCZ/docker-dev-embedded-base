@@ -203,7 +203,7 @@ pass "dev-doctor clean"
 
 echo "== CLAUDE.md memory layers assembled =="
 M="$HOME/.claude/CLAUDE.md"
-[ -d "$HOME/.claude-memory-layers" ] || fail "~/.claude-memory-layers missing"
+[ -d "$HOME/.claude-memory-layers" ] || fail "$HOME/.claude-memory-layers missing"
 for l in 00-baseline.md 10-embedded.md; do
     [ -f "$HOME/.claude-memory-layers/$l" ] || fail "memory layer $l not installed"
 done

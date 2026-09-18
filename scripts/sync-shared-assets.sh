@@ -33,8 +33,10 @@ fi
 if [ $# -gt 0 ]; then
     TARGETS=("$@")
 else
-    # Default: sibling checkouts that need the copies.
+    # Default: sibling checkouts that need the copies. One entry today; this is
+    # the fan-out list and grows as downstream images are added.
     TARGETS=()
+    # shellcheck disable=SC2043
     for name in docker-dev-embedded-telink; do
         candidate="$(dirname "$REPO_ROOT")/$name"
         [ -d "$candidate" ] && TARGETS+=("$candidate")
