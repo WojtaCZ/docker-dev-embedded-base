@@ -90,16 +90,22 @@ jobs:
           gh api repos/WojtaCZ/docker-dev-template/dispatches \
              -f event_type=downstream-verified
 
-      # Fan out to leaf images so they rebuild against the fresh base layer.
+      # The image is already published by this point, so a failed fan-out must
+      # not fail the run: it means leaf images rebuild late, not that this one
+      # is bad. Each dispatch is independent and warns for itself.
       - name: Notify leaf images
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.DOWNSTREAM_DISPATCH_PAT }}
         run: |
-          gh api repos/WojtaCZ/docker-dev-embedded-arm/dispatches \
-             -f event_type=base-image-updated
-          gh api repos/WojtaCZ/docker-dev-embedded-wch/dispatches \
-             -f event_type=base-image-updated
+          for repo in docker-dev-embedded-arm docker-dev-embedded-wch; do
+            if gh api "repos/WojtaCZ/$repo/dispatches" -f event_type=base-image-updated >/dev/null; then
+              echo "dispatched base-image-updated -> $repo"
+            else
+              echo "::warning::could not dispatch to $repo -- DOWNSTREAM_DISPATCH_PAT may lack access to it"
+            fi
+          done
 
   # Shared assets in this repo are the source of truth for the copies carried by
   # docker-dev-embedded-telink. Warn when they drift.
