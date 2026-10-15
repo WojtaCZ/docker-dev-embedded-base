@@ -82,7 +82,10 @@ fi
 USB_ARGS=()
 [ -d /dev/bus/usb ] && USB_ARGS+=(--device=/dev/bus/usb)
 [ -d /dev/serial/by-id ] && USB_ARGS+=(-v /dev/serial/by-id:/dev/serial/by-id:ro)
-USB_ARGS+=(-v /sys/bus/usb:/sys/bus/usb)
+# /sys/bus/usb is deliberately NOT bind-mounted: Docker Desktop replays saved
+# bind sources at WSL-integration start, and after a WSL restart it no longer
+# exists ("mkdir /sys/bus/usb: operation not permitted"). The container's own
+# /sys already exposes it once the host has USB.
 [ -n "${DEV_PROBE:-}" ] && [ -e "$DEV_PROBE" ] && USB_ARGS+=(--device="$DEV_PROBE")
 
 if [ ! -d /dev/bus/usb ]; then
